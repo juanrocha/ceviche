@@ -34,7 +34,8 @@ dat %>%
 ## log-transform fish_consumption_total
 
 dat %>%
-    select(52:62) %>% 
+    select(52:62) %>%
+#    map_df(., log1p) %>% 
     GGally::ggpairs(lower = list(continuous = GGally::wrap("points", alpha = 0.15)))
 
 ## check if gdp is used to calculated HDI? strong relationship
@@ -49,11 +50,13 @@ ggplot(dat, aes(netmigration)) + geom_density() # clarify units
 ## clarify units (biomass?), use total, and as secondary variable a ratio marine/freshwater
 dat %>%
     select(62:70) %>% 
+    map_df(., log1p) %>% 
     GGally::ggpairs(lower = list(continuous = GGally::wrap("points", alpha = 0.15)))
 
 ## very strong correlations (1 pretty much), not sure is useful
 dat %>%
     select(starts_with("freshwater")) %>% 
+#    map_df(., log1p) %>% 
     GGally::ggpairs(lower = list(continuous = GGally::wrap("points", alpha = 0.15)))
 
 ## strong correlations with total, but the groups do have some information. Mollusca and invertebrata are strongly correlated. Log-transform improves correlations.
@@ -65,19 +68,31 @@ dat %>%
 ## zero inflated distributions: check what transformation alleviates skewness
 dat %>%
     select(starts_with("brackish")) %>% 
-    map_df(., log1p) %>% 
+    #map_df(., log1p) %>% 
     GGally::ggpairs(lower = list(continuous = GGally::wrap("points", alpha = 0.15)))
 
-## No idea what sentry is, incomplete info on metadata file
+## No idea what gentry is, incomplete info on metadata file
 dat %>%
     select(starts_with("gentry")) %>% 
-    # map_df(., log1p) %>% 
+    #map_df(., log1p) %>% 
     GGally::ggpairs(lower = list(continuous = GGally::wrap("points", alpha = 0.15)))
 
+## the indexes although new are hard to interpret because they are in themselves summary of other hidden dimensions. Strongly correlated epi and htl.
 dat %>%
     select(87:91, 98:100) %>% 
-    # map_df(., log1p) %>% 
+    mutate(
+        eez_area_km_seas_around_us = log1p(eez_area_km_seas_around_us),
+        water_stress_index_fao = log1p(water_stress_index_fao),
+        land_equipped_for_irrigation_fao_most_recent_year_1000ha = log1p(land_equipped_for_irrigation_fao_most_recent_year_1000ha),
+        inland_water_area_fao_2017_1000ha = log1p(inland_water_area_fao_2017_1000ha),
+        coastline_length_km_cia_world_fact_book = log1p(coastline_length_km_cia_world_fact_book)
+    ) %>% 
     GGally::ggpairs(lower = list(continuous = GGally::wrap("points", alpha = 0.15)))
+
+# needs transformation
+ggplot(dat, aes(water_stress_index_fao)) + geom_density() + scale_x_log10()
+ggplot(dat, aes(land_equipped_for_irrigation_fao_most_recent_year_1000ha)) + geom_density() + scale_x_log10()
+ggplot(dat, aes(inland_water_area_fao_2017_1000ha)) + geom_density() + scale_x_log10()
 
 names(dat)
 
