@@ -4,7 +4,7 @@ library(tidymodels)
 
 load("data/data.RData")
 
-dat %>% 
+dat_pro <- dat %>% 
     # get rid of heavily correlated vars and zero inflated
     select(-starts_with("reexports"), -regu_qual, -rule_law, -hdi, -urbanpop,
            -total_aq_production, -freshwater_amphibia_reptilia, -freshwater_crustacea,
@@ -29,5 +29,23 @@ dat %>%
             log1p(coastline_length_km_cia_world_fact_book)) %>%  
     ## center to zero mean and unit variance
     mutate(
-        across(where(is.numeric), scales::)
+        across(
+            where(is.numeric), 
+            function(x) { 
+                z <- (x-mean(x, na.rm = TRUE) ) / sd(x, na.rm = TRUE)
+                return(z)
+            })
     )
+
+
+## Correlations:
+dat_pro %>% select(where(is.numeric)) %>% 
+    cor() %>% 
+    gplots::heatmap.2(
+        trace = "none", margins = c(12,12),
+        col = RColorBrewer::brewer.pal(10, "RdBu"),
+        keysize = 1.2, key.title = "",
+        cexRow = 0.5, cexCol = 0.5)
+
+
+

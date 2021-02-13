@@ -18,7 +18,7 @@ dat %>%
     GGally::ggpairs(lower = list(continuous = GGally::wrap("points", alpha = 0.15)))
 
 dat %>%
-    select(starts_with("exports")) %>% 
+    select(starts_with("export")) %>% 
     map_df(., log1p) %>% 
     GGally::ggpairs(lower = list(continuous = GGally::wrap("points", alpha = 0.15)))
 
