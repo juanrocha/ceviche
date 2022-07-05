@@ -1,0 +1,202 @@
+---
+title: "Ceviche: random forest"
+author: "Juan Rocha"
+date: "2022-07-05"
+output:
+    html_document:
+      theme:
+        bootswatch: cosmo
+        code_font:
+            google: Fira Code
+      df_print: paged
+      code_folding: hide
+      toc: true
+      toc_float:
+        collapsed: true
+        smooth_control: true
+      toc_depth: 3
+      fig_caption: true
+      highlight: pygments
+      self_contained: false
+      lib_dir: libs
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+Import data: 
+```{r message = FALSE, warning=FALSE}
+suppressPackageStartupMessages(library(tidyverse))
+library(patchwork)
+library(GGally)
+library(tidyverse)
+library(tictoc)
+library(tidymodels)
+
+## read raw data for exploration: latest dataset
+# dat <- googlesheets4::read_sheet(
+#     "https://docs.google.com/spreadsheets/d/1GiCDbKRnGq7WfFOLwoUvrOCHkWGWy2ofbGqtOHBGCX4/edit#gid=1404296305")
+
+## data file on disk:
+#load("data/data.RData")
+
+dat <- read_csv(file = "data/data_06052022.csv")
+
+# fix names
+dat <- dat %>%
+    janitor::clean_names() 
+
+
+```
+
+Split data into training and testing sets
+
+```{r}
+## Data split
+data_split <- initial_split(
+    dat, prop = 2/3)
+train_data <- training(data_split)
+test_data <- testing(data_split)
+```
+
+## Data pre-processing
+
+Based on the suggestions from the previous analysis:
+
+```{r fig.width=6, fig.height=6}
+
+#### Random forest ####
+# Random forest does not need a lot of pre-processing and allow variables in their natural units
+rf_rcp <-  recipe(
+    total_aq_production ~ . ,
+    data = train_data) |> 
+    step_select(all_numeric()) |> 
+    step_impute_knn(all_numeric_predictors()) 
+
+
+rf_prep <- prep(rf_rcp)
+juiced <- juice(rf_prep)
+
+## model specification
+rf_model <- rand_forest(mtry = tune(), min_n = tune(), trees = 1000) %>% 
+    set_mode("regression") %>%
+    set_engine("ranger") #importance = "impurity"
+
+## workflow:
+rf_workflow <- workflow() %>%
+    add_recipe(rf_rcp) %>%
+    add_model(rf_model) 
+
+```
+
+Train hyper parameters:
+
+```{r}
+## Train hyperparameter  
+set.seed(1234)
+folds <- vfold_cv(train_data, v=10)
+
+doParallel::registerDoParallel(cores = 8)
+
+set.seed(0987)
+tic()
+rf_res <- rf_workflow %>%
+  tune_grid(resamples = folds,
+            grid = 20) 
+toc() ##18s on 8 cores parallel
+
+```
+
+```{r}
+
+rf_res %>% 
+    collect_metrics() %>% 
+    #filter(.metric == "rmse") %>% 
+    select(mean, min_n, mtry, .metric) %>% 
+    pivot_longer(cols = min_n:mtry, names_to = "tune_parm", values_to = "value") %>% 
+    ggplot(aes(value, mean)) + 
+    geom_point(aes(color = tune_parm)) +
+    facet_grid(.metric~tune_parm, scales = "free_y")
+
+```
+
+```{r}
+rf_grid <- grid_regular(
+    mtry(range = c(2,20)), 
+    min_n(range = c(10,35)),
+    levels = 5
+)
+```
+
+```{r}
+set.seed(6789)
+tic()
+regular_res <- tune_grid(
+    rf_workflow,
+    resamples = folds,
+    grid = rf_grid
+)
+toc() #20s
+```
+
+```{r}
+regular_res %>% 
+    collect_metrics() %>% 
+    mutate(min_n = factor(min_n)) %>% 
+    ggplot(aes(mtry, mean, color = min_n)) +
+    geom_line() +
+    geom_point() +
+    facet_wrap(~.metric, scales = "free_y")
+
+
+best_mod <- select_best(regular_res)
+```
+
+```{r}
+rf_final <- finalize_model(
+    rf_model,
+    best_mod
+)
+```
+
+```{r}
+tic()
+rf_final %>%
+    set_engine("ranger", importance = "permutation") %>%
+    fit(total_aq_production ~ . ,
+        data = juice(rf_prep)) %>%
+    vip::vip(geom = "point")
+toc()
+```
+
+```{r}
+final_wf <- workflow() %>% 
+    add_recipe(rf_rcp) %>% 
+    add_model(rf_final)
+```
+
+```{r}
+## train the final on training set and evaluates on test set
+final_fit <- final_wf %>% 
+    last_fit(data_split)
+
+final_fit$.metrics 
+```
+The model does not overfit, same performance on test than on train data.
+
+```{r}
+final_fit %>% 
+    collect_predictions() |> 
+    ggplot(aes(.pred, total_aq_production)) +
+    geom_point() +
+    geom_smooth() +
+    scale_x_log10() +
+    scale_y_log10(    )
+```
+
+```{r}
+# save(final_fit, regular_res, rf_res, 
+#      file = "data/random_forest.RData")
+```
+
