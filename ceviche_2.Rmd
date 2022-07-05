@@ -1,0 +1,305 @@
+---
+title: "Ceviche: data exploration"
+author: "Juan Rocha"
+date: "2022-05-10"
+output:
+    html_document:
+      theme:
+        bootswatch: cosmo
+        code_font:
+            google: Fira Code
+      df_print: paged
+      code_folding: hide
+      toc: true
+      toc_float:
+        collapsed: true
+        smooth_control: true
+      toc_depth: 3
+      fig_caption: true
+      highlight: pygments
+      self_contained: false
+      lib_dir: libs
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+Import data:
+
+```{r message = FALSE, warning=FALSE}
+suppressPackageStartupMessages(library(tidyverse))
+library(patchwork)
+library(GGally)
+
+## read raw data for exploration: latest dataset
+# dat <- googlesheets4::read_sheet(
+#     "https://docs.google.com/spreadsheets/d/1GiCDbKRnGq7WfFOLwoUvrOCHkWGWy2ofbGqtOHBGCX4/edit#gid=1404296305")
+
+## data file on disk:
+#load("data/data.RData")
+
+dat <- read_csv(file = "data/data_06052022.csv")
+
+# fix names
+dat <- dat %>%
+    janitor::clean_names() 
+
+dat %>% skimr::skim()
+
+```
+
+## Preliminary visualizations
+
+Looking for problematic correlations
+
+### Trade data
+
+```{r}
+dat %>%
+    select(5, 13:15,23) %>% 
+    GGally::ggpairs(lower = list(continuous = GGally::wrap("points", alpha = 0.15))) +
+    labs(title = "Exports raw data") +
+    theme_light(base_size = 8)
+
+dat %>%
+    select(5, 13:15,23) %>% 
+    map_df(., log1p) %>% 
+    GGally::ggpairs(lower = list(continuous = GGally::wrap("points", alpha = 0.15))) +
+    labs(title = "Exports log transformed")+
+    theme_light(base_size = 8)
+
+```
+
+Probably balance need to be dropped.
+
+```{r}
+# dat %>%
+#     select(starts_with("import")) %>% 
+#     map_df(., log1p) %>% 
+#     GGally::ggpairs(lower = list(continuous = GGally::wrap("points", alpha = 0.15))) +
+#     labs(title = "Imports raw data") +
+#     theme_light(base_size = 8)
+# 
+# dat %>%
+#     select(starts_with("reexports")) %>% 
+#     map_df(., log1p) %>% 
+#     GGally::ggpairs(lower = list(continuous = GGally::wrap("points", alpha = 0.15)))+
+#     labs(title = "Reexports")+
+#     theme_light(base_size = 8)
+```
+
+
+
+### Governance data
+
+```{r}
+dat %>%
+    select(13:23) %>%
+    map_df(., log1p) %>% 
+    GGally::ggpairs(lower = list(continuous = GGally::wrap("points", alpha = 0.15)))+
+    labs(title = "Governance indicators")+
+    theme_light(base_size = 8)
+
+```
+
+- check if gdp is used to calculated HDI? strong relationship
+- strong correlation urban/rural pop. Chose one, keep coastal in anycase, needs log-transform
+- valueadded_agriforestfish = Value added in millions of USD$, needs log-transform
+
+
+### Aquaculture
+
+```{r}
+dat %>%
+    select(5, 24,26:34) %>% 
+    map_df(., log1p) %>% 
+    GGally::ggpairs(lower = list(continuous = GGally::wrap("points", alpha = 0.15))) +
+    labs(title = "Aquaculture stats") + 
+    theme_light(base_size = 8)
+```
+
+- growth rates need transformations
+- consumption and production need log-trans
+- total production and consumption need log trans, and highly correlated
+- distribution of ratios look problematic but don't transform just now
+
+### Other variables
+
+
+```{r}
+dat %>%
+    select(35:41) %>% 
+    #map_df(., log1p) %>% 
+    GGally::ggpairs(lower = list(continuous = GGally::wrap("points", alpha = 0.15)))+ 
+    theme_light(base_size = 8)
+
+```
+
+The indexes although new are hard to interpret because they are in themselves summary of other hidden dimensions. Strongly correlated epi and htl, which one to use?
+
+Log-transform:
+- wataer stress, irrigation fao, water area fao, length km coasts.
+- supply variability, domestic supply seafood, species counts
+
+does not need transformation: teperature change
+
+```{r}
+dat %>%
+    select(42:last_col()) %>% 
+    #map_df(., log1p) %>% 
+    GGally::ggpairs(lower = list(continuous = GGally::wrap("points", alpha = 0.15)))+ 
+    theme_light(base_size = 8)
+
+```
+
+Transform all, it breaks the correlations.
+
+Impute missing values
+
+```{r}
+dat <- dat |> 
+    naniar::impute_mean_if(.predicate = is.numeric)
+
+dat |> select(where(is.numeric)) %>%
+    cor() %>%
+    gplots::heatmap.2(
+        trace = "none", margins = c(12,12),
+        col = RColorBrewer::brewer.pal(10, "RdBu"),
+        keysize = 1.2, key.title = "",
+        cexRow = 0.5, cexCol = 0.5)
+```
+
+
+## Data pre-processing
+
+Based on the suggestions above:
+
+```{r fig.width=6, fig.height=6}
+
+cols <- names(dat)
+cols[-c(1:4, 6:12, 15, 22,28,29)]
+
+dat_pro <- dat %>% 
+    # log-transform:
+    mutate(
+        across(.cols = cols[-c(1:4, 6:12, 15, 22,28,29)], log1p),
+        # convert back the few vars that should be in natural units
+        temperature_change_celsius_fao = exp(temperature_change_celsius_fao)+1,
+        freshwater_production_ratio = exp(freshwater_production_ratio) +1,
+        marine_production_ratio = exp(marine_production_ratio) + 1,
+        brackish_production_ratio = exp(brackish_production_ratio) + 1
+        ) %>%  
+    # get rid of heavily correlated vars and zero inflated
+    select(-regu_qual, -rule_law, -hlt_new) %>%
+    ## center to zero mean and unit variance
+    mutate(
+        across(
+            where(is.numeric), 
+            function(x) { 
+                z <- (x-mean(x, na.rm = TRUE) ) / sd(x, na.rm = TRUE)
+                return(z)
+            })
+    )
+
+## Correlations:
+dat_pro %>% select(where(is.numeric)) %>%
+    cor() %>%
+    gplots::heatmap.2(
+        trace = "none", margins = c(12,12),
+        col = RColorBrewer::brewer.pal(10, "RdBu"),
+        keysize = 1.2, key.title = "",
+        cexRow = 0.5, cexCol = 0.5)
+
+```
+
+Not perfect but let's try the clustering.
+
+## Clustering analysis
+
+```{r}
+library(vegan)
+library(NbClust)
+library(clValid)
+library(mclust)
+```
+
+
+Using mahalanobis distance help us dealing with colinearity or strong correlations.
+```{r}
+d <- dat_pro %>% 
+    select(-uncode, -iso, -country, -order, where(is.numeric)) %>% 
+    vegdist(., method = "mahalanobis", tol= 10e-20)
+```
+
+Validating number of clusters, euclidean and manhattan distances are not good for gradient separation (see help vegdist)
+
+```{r}
+m <- "ward.D2" # minimize the total within-cluster variance
+
+clust_num <- NbClust( 
+    data = dat_pro %>% 
+        select(-uncode, -iso, -country, -order, where(is.numeric)),
+    distance = "minkowski",
+    min.nc = 3, max.nc = 15, 
+    method = m, 
+    index = 'all') ## 3 is the optimal number
+
+```
+
+```{r}
+m <- "ward.D2" # minimize the total within-cluster variance
+
+clust_num <- NbClust( 
+    data = dat_pro %>% 
+        select(-uncode, -iso, -country, -order, where(is.numeric)),
+    diss = d, distance = NULL,
+    min.nc = 3, max.nc = 15, 
+    method = m, 
+    index = 'all') ## 3 is the optimal number
+
+```
+
+
+Using euclidean: 4 algorithms suggest 5 clusters when adding D and Hubert indexes; but 3 is the most suitable split.
+Using Canberra: 9 metrics favour 2 as optimal number of clusters
+Using Mikowski: 3 is the optimal number of clusters, but D and hubert adds to 4 suggesting 5 clusters.
+Using Mahalanobis, 2 is the advised number of clusters (5 metrics) followed by 7 with 4 metrics (adding Hubert).
+Stability & Internal validation
+
+```{r}
+stab <- clValid(
+    obj = dat_pro %>% 
+        select(-uncode, -iso, -country, -order, where(is.numeric)) %>% 
+        as.matrix(), 
+    nClust = c(3:9),
+    clMethods = c("hierarchical", "kmeans", "diana", "fanny", #"som",
+                "model", "sota", "pam", "clara", "agnes"),
+    validation = c('stability', "internal"),
+    #metric = "manhattan", method = "ward",
+    verbose = FALSE
+) ## Hierarchical is the optimal method
+
+dat_pro$clus <- clust_num$Best.partition
+```
+
+## Result
+
+```{r}
+df_map <- dat_pro %>% 
+    select(iso, region = country, clus)
+
+world <- map_data("world")
+
+world <- left_join(world, df_map)
+
+g <- ggplot(world, aes(x = long, y = lat)) +
+    geom_polygon(aes(group = group, fill = as.factor(clus)), 
+              size = 0.1, color = "grey50") +
+    scale_fill_brewer("cluster", palette = "Set1") +
+    theme_void(base_size = 8) +
+    theme(legend.position = c(0.1, 0.3), 
+          legend.key.size = unit(0.25, "cm"))
+
+g
+```

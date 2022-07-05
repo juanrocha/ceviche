@@ -1,0 +1,335 @@
+---
+title: "Ceviche: data exploration"
+author: "Juan Rocha"
+date: "2022-05-04"
+output:
+    html_document:
+      theme:
+        bootswatch: cosmo
+        code_font:
+            google: Fira Code
+      df_print: paged
+      code_folding: hide
+      toc: true
+      toc_float:
+        collapsed: true
+        smooth_control: true
+      toc_depth: 3
+      fig_caption: true
+      highlight: pygments
+      self_contained: false
+      lib_dir: libs
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+Import data:
+
+```{r message = FALSE, warning=FALSE}
+suppressPackageStartupMessages(library(tidyverse))
+library(patchwork)
+library(GGally)
+
+## read raw data for exploration: latest dataset
+# dat <- googlesheets4::read_sheet(
+#     "https://docs.google.com/spreadsheets/d/1GiCDbKRnGq7WfFOLwoUvrOCHkWGWy2ofbGqtOHBGCX4/edit#gid=1404296305")
+
+## data file on disk:
+#load("data/data.RData")
+
+dat <- read_csv(file = "data/data_06052022.csv")
+
+# fix names
+dat <- dat %>%
+    janitor::clean_names() 
+
+dat %>% skimr::skim()
+
+```
+
+## Preliminary visualizations
+
+Looking for problematic correlations
+
+### Trade data
+
+```{r}
+dat %>%
+    select(starts_with("export")) %>% 
+    GGally::ggpairs(lower = list(continuous = GGally::wrap("points", alpha = 0.15))) +
+    labs(title = "Exports raw data") +
+    theme_light(base_size = 8)
+
+dat %>%
+    select(starts_with("export")) %>% 
+    map_df(., log1p) %>% 
+    GGally::ggpairs(lower = list(continuous = GGally::wrap("points", alpha = 0.15))) +
+    labs(title = "Exports log transformed")+
+    theme_light(base_size = 8)
+
+```
+
+```{r}
+dat %>%
+    select(starts_with("import")) %>% 
+    map_df(., log1p) %>% 
+    GGally::ggpairs(lower = list(continuous = GGally::wrap("points", alpha = 0.15))) +
+    labs(title = "Imports raw data") +
+    theme_light(base_size = 8)
+
+dat %>%
+    select(starts_with("reexports")) %>% 
+    map_df(., log1p) %>% 
+    GGally::ggpairs(lower = list(continuous = GGally::wrap("points", alpha = 0.15)))+
+    labs(title = "Reexports")+
+    theme_light(base_size = 8)
+```
+
+
+- The imports / exports are measured in US dollars, probably they need to be log transformed. 
+- Suggestion: use biomass when possible
+- Suggestion: remove reexports, it's mainly zeroes, or engineer a feature that is reexports > 0 
+
+### Governance data
+
+```{r}
+dat %>%
+    select(6:12) %>%
+#    map_df(., log1p) %>% 
+    GGally::ggpairs(lower = list(continuous = GGally::wrap("points", alpha = 0.15)))+
+    labs(title = "Governance indicators")+
+    theme_light(base_size = 8)
+
+```
+
+- check if gdp is used to calculated HDI? strong relationship
+- strong correlation urban/rural pop. Chose one, keep coastal in anycase, needs log-transform
+- valueadded_agriforestfish = Value added in millions of USD$, needs log-transform
+
+```{r}
+a <- ggplot(dat, aes(valueadded_agriforestfish)) + geom_density() + scale_x_log10()
+b <- ggplot(dat, aes(fish_consumption)) + geom_density() 
+c <- ggplot(dat, aes(netmigration)) + geom_density() # clarify units
+
+(a+b+c) & theme_light(base_size = 8)
+```
+
+### Aquaculture
+
+```{r}
+dat %>%
+    select(37:49) %>% 
+    #map_df(., log1p) %>% 
+    GGally::ggpairs(lower = list(continuous = GGally::wrap("points", alpha = 0.15))) +
+    labs(title = "Aquaculture stats") + 
+    theme_light(base_size = 8)
+```
+
+There is a storngish corrleation between total and freshwater aquaculture. If needed one can use the ratio between marine and freshwater.
+
+```{r}
+dat %>%
+    select(starts_with("freshwater")) %>% 
+#    map_df(., log1p) %>% 
+    GGally::ggpairs(lower = list(continuous = GGally::wrap("points", alpha = 0.15))) +
+    labs(title = "Freshwater stats")+ 
+    theme_light(base_size = 8)
+```
+
+Very strong correlations (1 pretty much), not sure is useful for clustering.
+
+```{r}
+dat %>%
+    select(starts_with("marine")) %>% 
+    map_df(., log1p) %>% 
+    GGally::ggpairs(lower = list(continuous = GGally::wrap("points", alpha = 0.15))) +
+    labs(title = "Marine stats")+ 
+    theme_light(base_size = 8)
+```
+
+Strong correlations with total marine production, but the groups do have some information. Mollusca and invertebrata are strongly correlated. Log-transform improves correlations.
+
+```{r}
+dat %>%
+    select(starts_with("brackish")) %>% 
+    #map_df(., log1p) %>% 
+    GGally::ggpairs(lower = list(continuous = GGally::wrap("points", alpha = 0.15)))+
+    labs(title = "Brackish stats")+ 
+    theme_light(base_size = 8)
+
+```
+
+Zero inflated distributions: check what transformation alleviates skewness. There is also very few datapoints. Perhaps safe to drop this selection of variables.
+
+### Other variables
+
+No idea what gentry is, incomplete info on metadata file
+
+```{r}
+dat %>%
+    select(starts_with("gentry")) %>% 
+    #map_df(., log1p) %>% 
+    GGally::ggpairs(lower = list(continuous = GGally::wrap("points", alpha = 0.15)))+ 
+    theme_light(base_size = 8)
+
+```
+
+The indexes although new are hard to interpret because they are in themselves summary of other hidden dimensions. Strongly correlated epi and htl.
+
+```{r}
+dat %>%
+    select(87:91, 98:100) %>% 
+    mutate(
+        eez_area_km_seas_around_us = log1p(eez_area_km_seas_around_us),
+        water_stress_index_fao = log1p(water_stress_index_fao),
+        land_equipped_for_irrigation_fao_most_recent_year_1000ha = log1p(land_equipped_for_irrigation_fao_most_recent_year_1000ha),
+        inland_water_area_fao_2017_1000ha = log1p(inland_water_area_fao_2017_1000ha),
+        coastline_length_km_cia_world_fact_book = log1p(coastline_length_km_cia_world_fact_book)
+    ) %>% 
+    GGally::ggpairs(lower = list(continuous = GGally::wrap("points", alpha = 0.15))) + 
+    theme_light(base_size = 8)
+
+```
+
+This ones need transformations
+
+```{r fig.width=6, fig.height=2}
+a <- ggplot(dat, aes(water_stress_index_fao)) + 
+    geom_density() + 
+    scale_x_log10()
+b <- ggplot(
+    dat, aes(land_equipped_for_irrigation_fao_most_recent_year_1000ha)) + 
+    geom_density() + 
+    scale_x_log10()
+c <- ggplot(dat, aes(inland_water_area_fao_2017_1000ha)) + 
+    geom_density() + 
+    scale_x_log10()
+
+a + b+ c & theme_light(base_size = 8)
+```
+
+## Data pre-processing
+
+Based on the suggestions above:
+
+```{r fig.width=6, fig.height=6}
+dat_pro <- dat %>% 
+    # get rid of heavily correlated vars and zero inflated
+    # select(-starts_with("reexports"), -regu_qual, -rule_law, -urbanpop,
+    #        -total_aq_production, -freshwater_amphibia_reptilia, 
+    #        -freshwater_crustacea,
+    #        -freshwater_invertebrata, -freshwater_mollusca, -freshwater_pisces,
+    #        -freshwater_plantae, -marine_aq_total, -starts_with("brackish"),
+    #        -starts_with("gentry")) %>% 
+    # log-transform:
+    mutate(
+        across(starts_with("import"), log1p),
+        across(starts_with("export"), log1p),
+        fish_consumption_total = log1p(fish_consumption_total),
+        # urbanpop = log1p(urbanpop), 
+        ruralpop = log1p(ruralpop),
+        coastalpop = log1p(coastalpop),
+        valueadded_agriforestfish = log1p(valueadded_agriforestfish),
+        eez_area_km_seas_around_us = log1p(eez_area_km_seas_around_us),
+        water_stress_index_fao = log1p(water_stress_index_fao),
+        land_equipped_for_irrigation_fao_most_recent_year_1000ha = 
+            log1p(land_equipped_for_irrigation_fao_most_recent_year_1000ha),
+        inland_water_area_fao_2017_1000ha = log1p(inland_water_area_fao_2017_1000ha),
+        coastline_length_km_cia_world_fact_book = 
+            log1p(coastline_length_km_cia_world_fact_book)) %>%  
+    ## center to zero mean and unit variance
+    mutate(
+        across(
+            where(is.numeric), 
+            function(x) { 
+                z <- (x-mean(x, na.rm = TRUE) ) / sd(x, na.rm = TRUE)
+                return(z)
+            })
+    )
+
+## Correlations:
+dat_pro %>% select(where(is.numeric)) %>% 
+    cor() %>% 
+    gplots::heatmap.2(
+        trace = "none", margins = c(12,12),
+        col = RColorBrewer::brewer.pal(10, "RdBu"),
+        keysize = 1.2, key.title = "",
+        cexRow = 0.5, cexCol = 0.5)
+
+
+
+```
+
+Not perfect but let's try the clustering.
+
+## Clustering analysis
+
+```{r}
+library(vegan)
+library(NbClust)
+library(clValid)
+library(mclust)
+```
+
+
+Using mahalanobis distance help us dealing with colinearity or strong correlations.
+```{r}
+d <- dat_pro %>% 
+    select(-uncode, -iso, -country_x, where(is.numeric)) %>% 
+    vegdist(., method = "mahalanobis", tol= 10e-20)
+```
+
+Validating number of clusters, euclidean and manhattan distances are not good for gradient separation (see help vegdist)
+
+```{r}
+m <- "ward.D2" # minimize the total within-cluster variance
+
+clust_num <- NbClust( 
+    data = dat_pro %>% 
+        select(-uncode, -iso, -country_x, where(is.numeric)),
+    #diss = d,
+    min.nc = 2, max.nc = 15, 
+    method = m, 
+    index = 'all') ## 3 is the optimal number
+
+```
+Stability & Internal validation
+
+```{r}
+stab <- clValid(
+    obj = dat_pro %>% 
+        select(where(is.numeric), -uncode) %>% 
+        as.matrix(), 
+    nClust = c(3:9),
+    clMethods = c("hierarchical", "kmeans", "diana", "fanny", #"som",
+                "model", "sota", "pam", "clara", "agnes"),
+    validation = c('stability', "internal"),
+    #metric = "manhattan", method = "ward",
+    verbose = FALSE
+) ## Hierarchical is the optimal method
+
+dat_pro$clus <- clust_num$Best.partition
+```
+
+## Result
+
+```{r}
+df_map <- dat_pro %>% 
+    select(iso, region = country_x, clus)
+
+world <- map_data("world")
+
+world <- left_join(world, df_map)
+
+g <- ggplot(world, aes(x = long, y = lat)) +
+    geom_polygon(aes(group = group, fill = as.factor(clus)), 
+              size = 0.1, color = "grey50") +
+    scale_fill_viridis_d("cluster") +
+    theme_void(base_size = 8) +
+    theme(legend.position = c(0.1, 0.3), 
+          legend.key.size = unit(0.25, "cm"))
+
+g
+```

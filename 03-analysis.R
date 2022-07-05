@@ -7,7 +7,8 @@ library(mclust)
 
 #### Clustering #### 
 ## Using mahalanobis distance help us dealing with colinearity or strong correlations.
-d <- dat %>% select(where(is.numeric), -uncode) %>% 
+d <- dat_pro %>% 
+    select(-uncode, -id, -iso, -country, where(is.numeric)) %>% 
     vegdist(., method = "mahalanobis", tol= 10e-20)
 
 ## Validating number of clusters
@@ -16,8 +17,8 @@ m <- "ward.D2" # minimize the total within-cluster variance
 
 clust_num <- NbClust( 
     data = dat_pro %>% 
-        select(where(is.numeric), -uncode),
-    #distance = "maximum",
+        select(-uncode, -id, -iso, -country, where(is.numeric)),
+    #diss = d,
     min.nc = 2, max.nc = 15, 
     method = m, 
     index = 'all') ## 3 is the optimal number
